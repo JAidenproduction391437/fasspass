@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>FacePass Scanner</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <link rel="icon" href="/static/img/icon.svg" type="image/svg+xml">
+  <style>
+    body { overflow: hidden; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+    .screen { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; }
+
+    /* idle */
+    #idle { gap: 18px; background: radial-gradient(120% 80% at 50% 0%, #102a22 0%, var(--bg) 60%); }
+    #idle .brand { font-size: 20px; position: absolute; top: max(24px, env(safe-area-inset-top)); left: 24px; }
+    #clock { font-size: clamp(56px, 16vw, 96px); font-weight: 200; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; line-height: 1; }
+    #date { color: var(--muted); margin-top: -6px; }
+    .scan-ring {
+      width: min(58vw, 240px); aspect-ratio: 1; border-radius: 50%; margin: 28px 0 8px;
+      display: grid; place-items: center; position: relative; border: 2px solid rgba(52, 211, 153, 0.35);
+    }
+    .scan-ring::before, .scan-ring::after {
+      content: ""; position: absolute; inset: -2px; border-radius: 50%; border: 2px solid var(--accent);
+      animation: pulse 2.4s ease-out infinite; opacity: 0;
+    }
+    .scan-ring::after { animation-delay: 1.2s; }
+    @keyframes pulse { 0% { transform: scale(1); opacity: 0.7; } 100% { transform: scale(1.35); opacity: 0; } }
+    .scan-ring svg { width: 46%; color: var(--accent); }
+    #idle { padding-top: 76px; }
+    @media (max-height: 860px) {
+      #clock { font-size: 64px; }
+      .scan-ring { width: 150px; margin: 14px 0 4px; }
+    }
+    #verifyBtn { font-size: 20px; padding: 18px 40px; min-width: min(80vw, 320px); }
+    #idleNote { color: var(--muted); min-height: 1.5em; font-size: 15px; }
+    #gear {
+      position: absolute; top: max(18px, env(safe-area-inset-top)); right: 18px; width: 44px; height: 44px;
+      border-radius: 50%; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer;
+    }
+
+    /* camera */
+    #camera { padding: 0; }
+    #camera .faceframe { position: absolute; inset: 0; }
+    #camera .top { position: absolute; top: max(22px, env(safe-area-inset-top)); left: 0; right: 0; font-size: 20px; font-weight: 600; text-shadow: 0 1px 8px #000; }
+    #camera .bottom { position: absolute; bottom: max(36px, env(safe-area-inset-bottom)); left: 16px; right: 16px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+    #status { font-size: 18px; }
+
+    /* result */
+    #result { gap: 10px; transition: background 0.3s; }
+    #result.pass { background: radial-gradient(110% 80% at 50% 30%, #0f5132 0%, #052e1b 70%); }
+    #result.fail { background: radial-gradient(110% 80% at 50% 30%, #7f1d1d 0%, #300a0a 70%); }
+    #result.error { background: radial-gradient(110% 80% at 50% 30%, #6b4a0c 0%, #2a1c03 70%); }
+    .badge { width: min(42vw, 180px); aspect-ratio: 1; border-radius: 50%; display: grid; place-items: center; animation: pop 0.45s cubic-bezier(0.2, 1.4, 0.4, 1); }
+    .pass .badge { background: var(--pass); box-shadow: 0 0 0 14px rgba(34, 197, 94, 0.18), 0 0 80px rgba(34, 197, 94, 0.5); }
+    .fail .badge { background: var(--fail); box-shadow: 0 0 0 14px rgba(239, 68, 68, 0.18), 0 0 80px rgba(239, 68, 68, 0.5); }
+    .error .badge { background: var(--warn); }
+    .badge svg { width: 55%; color: #fff; stroke-width: 3.2; }
+    @keyframes pop { 0% { transform: scale(0.3); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+    #resultPhoto { width: 92px; height: 92px; border-radius: 50%; object-fit: cover; border: 3px solid rgba(255, 255, 255, 0.85); margin-top: 18px; }
+    #resultTitle { font-size: clamp(22px, 6vw, 30px); color: rgba(255, 255, 255, 0.8); margin: 18px 0 0; font-weight: 500; }
+    #resultName { font-size: clamp(34px, 10vw, 56px); font-weight: 800; margin: 0; line-height: 1.1; letter-spacing: -0.02em; word-break: break-word; }
+    #resultVerdict { margin-top: 18px; padding: 12px 30px; border-radius: 999px; font-size: clamp(22px, 7vw, 32px); font-weight: 900; letter-spacing: 0.08em; background: rgba(0, 0, 0, 0.28); }
+    .countdown { position: absolute; left: 0; bottom: 0; height: 6px; background: rgba(255, 255, 255, 0.75); width: 100%; transform-origin: left; }
+    .countdown.run { animation: shrink var(--dur, 5s) linear forwards; }
+    @keyframes shrink { to { transform: scaleX(0); } }
+    #resetIn { margin-top: 14px; color: rgba(255, 255, 255, 0.6); font-size: 14px; }
+    @media (max-height: 700px) {
+      .badge { width: 110px; }
+      #resultPhoto { width: 64px; height: 64px; margin-top: 10px; }
+      #resultTitle { margin-top: 8px; }
+      #resultVerdict { margin-top: 10px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- 1. Idle -->
+<section class="screen" id="idle">
+  <div class="brand">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M9 10h.01M15 10h.01M9.5 15a3.5 3.5 0 0 0 5 0"/></svg>
+    FacePass
+  </div>
+  <button id="gear" hidden aria-label="App settings">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+  </button>
+  <div id="clock">--:--</div>
+  <div id="date"></div>
+  <div class="scan-ring">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M9 10h.01M15 10h.01M9.5 15a3.5 3.5 0 0 0 5 0"/></svg>
+  </div>
+  <button class="btn" id="verifyBtn" disabled><span class="spinner" id="loadSpin"></span><span id="verifyLabel">Loading…</span></button>
+  <div id="idleNote"></div>
+</section>
+
+<!-- 2. Camera with face frame -->
+<section class="screen" id="camera" hidden>
+  <div id="frameHost"></div>
+  <div class="top">Line your face up inside the frame</div>
+  <div class="bottom">
+    <span class="status-pill" id="status">Starting camera…</span>
+    <button class="btn ghost" id="cancelBtn">Cancel</button>
+  </div>
+</section>
+
+<!-- 3. Result -->
+<section class="screen" id="result" hidden>
+  <div class="badge" id="badge"></div>
+  <img id="resultPhoto" alt="" hidden>
+  <p id="resultTitle"></p>
+  <h1 id="resultName"></h1>
+  <div id="resultVerdict"></div>
+  <div id="resetIn"></div>
+  <div class="countdown" id="countdown"></div>
+</section>
+
+<script type="module">
+  import { loadModels, FaceFrame } from "/static/js/facekit.js";
+
+  const RESULT_SECONDS = 5;
+  const SCAN_TIMEOUT_MS = 25000;
+  const $ = (id) => document.getElementById(id);
+  const ICON_CHECK = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>`;
+  const ICON_X = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>`;
+  const ICON_WARN = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M12 7v6M12 17h.01"/></svg>`;
+
+  let frame = null, scanTimer = null, resetTimer = null, tickTimer = null;
+  let session = 0; // bumps on every new scan / reset so stale async work is ignored
+
+  // ---- native app bridge (Android WebView) ----
+  if (window.FacePassApp) {
+    $("gear").hidden = false;
+    $("gear").onclick = () => window.FacePassApp.openSettings();
+  }
+
+  // ---- clock ----
+  function tick() {
+    const d = new Date();
+    $("clock").textContent = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    $("date").textContent = d.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
+  }
+  tick(); setInterval(tick, 10000);
+
+  // ---- sounds ----
+  let audio;
+  function beep(kind) {
+    try {
+      audio ||= new (window.AudioContext || window.webkitAudioContext)();
+      const notes = kind === "pass" ? [[660, 0], [990, 0.14]] : [[220, 0], [180, 0.2]];
+      for (const [f, t] of notes) {
+        const o = audio.createOscillator(), g = audio.createGain();
+        o.type = kind === "pass" ? "sine" : "square";
+        o.frequency.value = f;
+        g.gain.setValueAtTime(0.0001, audio.currentTime + t);
+        g.gain.exponentialRampToValueAtTime(0.25, audio.currentTime + t + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + t + 0.22);
+        o.connect(g).connect(audio.destination);
+        o.start(audio.currentTime + t); o.stop(audio.currentTime + t + 0.25);
+      }
+    } catch {}
+  }
+
+  // ---- screens ----
+  function show(id) {
+    for (const s of ["idle", "camera", "result"]) $(s).hidden = s !== id;
+  }
+
+  function goIdle(note = "") {
+    session++;
+    clearTimeout(scanTimer); clearTimeout(resetTimer); clearInterval(tickTimer);
+    frame?.stop(); frame = null;
+    $("frameHost").innerHTML = "";
+    $("idleNote").textContent = note;
+    show("idle");
+  }
+
+  function showResult(kind, { title = "", name = "", verdict = "", photo = null }) {
+    frame?.stop(); frame = null;
+    clearTimeout(scanTimer);
+    const r = $("result");
+    r.className = `screen ${kind}`;
+    $("badge").innerHTML = kind === "pass" ? ICON_CHECK : kind === "fail" ? ICON_X : ICON_WARN;
+    $("resultTitle").textContent = title;
+    $("resultName").textContent = name;
+    $("resultVerdict").textContent = verdict;
+    $("resultVerdict").hidden = !verdict;
+    $("resultPhoto").hidden = !photo;
+    if (photo) $("resultPhoto").src = photo;
+    show("result");
+    if (kind !== "error") beep(kind);
+
+    const cd = $("countdown");
+    cd.classList.remove("run"); void cd.offsetWidth;
+    cd.style.setProperty("--dur", `${RESULT_SECONDS}s`);
+    cd.classList.add("run");
+    let left = RESULT_SECONDS;
+    $("resetIn").textContent = `Resetting in ${left}s`;
+    tickTimer = setInterval(() => { left--; $("resetIn").textContent = `Resetting in ${Math.max(left, 0)}s`; }, 1000);
+    resetTimer = setTimeout(() => goIdle(), RESULT_SECONDS * 1000);
+  }
+
+  async function verify(descriptors) {
+    const res = await fetch("/api/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ descriptors }),
+    });
+    if (!res.ok) throw new Error(`Server error (${res.status})`);
+    return res.json();
+  }
+
+  async function startScan() {
+    const my = ++session;
+    $("idleNote").textContent = "";
+    show("camera");
+    const status = (text, kind) => { $("status").textContent = text; $("status").dataset.kind = kind; };
+    status("Starting camera…", "searching");
+    const host = document.createElement("div");
+    $("frameHost").replaceChildren(host);
+
+    const f = frame = new FaceFrame(host, {
+      onStatus: status,
+      onAligned: async () => {
+        status("Scanning your face…", "capturing");
+        try {
+          const { descriptors } = await f.capture(3);
+          if (my !== session) return;
+          status("Checking…", "capturing");
+          const r = await verify(descriptors);
+          if (my !== session) return;
+          if (r.match) {
+            showResult("pass", { title: "Welcome", name: r.name, verdict: "✓  YOU PASS", photo: r.photo });
+          } else {
+            showResult("fail", { title: "Face not recognised", name: "Access denied", verdict: "✕  DO NOT PASS" });
+          }
+        } catch (e) {
+          console.error(e);
+          if (my !== session) return;
+          if (e instanceof TypeError || /Server error/.test(e.message)) {
+            showResult("error", { title: "Can't reach the FacePass server", name: "Try again", verdict: "" });
+          } else {
+            status(e.message, "warn");
+            setTimeout(() => { if (my === session) f.resume(); }, 1200);
+          }
+        }
+      },
+    });
+
+    try {
+      await f.start();
+      if (my !== session) { f.stop(); return; }
+      scanTimer = setTimeout(() => goIdle("No face detected — tap Verify to try again."), SCAN_TIMEOUT_MS);
+    } catch (e) {
+      console.error(e);
+      if (my !== session) return;
+      goIdle(e.name === "NotAllowedError" ? "Camera permission is blocked. Allow it and try again." : e.message || "Couldn't open the camera.");
+    }
+  }
+
+  $("verifyBtn").onclick = () => { audio?.resume?.(); startScan(); };
+  $("cancelBtn").onclick = () => goIdle();
+
+  // ---- boot ----
+  loadModels((t) => ($("verifyLabel").textContent = t))
+    .then(() => {
+      $("loadSpin").remove();
+      $("verifyLabel").textContent = "Verify my face";
+      $("verifyBtn").disabled = false;
+      fetch("/api/stats").then((r) => r.json()).then((s) => {
+        if (s.enrolled === 0) $("idleNote").textContent = "No faces registered yet — enroll on the FacePass website.";
+      }).catch(() => {});
+    })
+    .catch((e) => {
+      console.error(e);
+      $("verifyLabel").textContent = "Couldn't load — tap to retry";
+      $("verifyBtn").disabled = false;
+      $("verifyBtn").onclick = () => location.reload();
+    });
+</script>
+</body>
+</html>

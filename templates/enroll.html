@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FacePass — Register your face</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <link rel="icon" href="/static/img/icon.svg" type="image/svg+xml">
+</head>
+<body>
+<div class="site">
+  <header>
+    <div class="brand">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M9 10h.01M15 10h.01M9.5 15a3.5 3.5 0 0 0 5 0"/></svg>
+      FacePass
+    </div>
+    <nav style="display:flex;gap:18px">
+      <a href="/static/download/FacePass.apk" download>Get the scanner app</a>
+      <a href="/admin">Manage</a>
+    </nav>
+  </header>
+
+  <div class="enroll-grid">
+    <section class="hero">
+      <h1>Register your face once.<br>Walk through after that.</h1>
+      <p>Your face and name are added to the FacePass scanner. When you scan at the door, it recognises you and lets you through.</p>
+      <ol class="steps">
+        <li><span class="num">1</span><div><b>Enter your name</b>This is what the scanner shows when it welcomes you.</div></li>
+        <li><span class="num">2</span><div><b>Line your face up in the frame</b>Look straight at the camera in good light. It captures automatically.</div></li>
+        <li><span class="num">3</span><div><b>Register</b>You can now verify on the FacePass app.</div></li>
+      </ol>
+    </section>
+
+    <section class="card" id="card">
+      <div id="form">
+        <div class="field">
+          <label for="name">Your name</label>
+          <input id="name" maxlength="60" autocomplete="name" placeholder="e.g. Alex Rivera">
+        </div>
+
+        <div class="capture-area" id="area">
+          <div class="placeholder" id="placeholder">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"/><circle cx="12" cy="11" r="4"/><path d="M6.5 19a6 6 0 0 1 11 0"/></svg>
+            <div id="loadText">Loading face models…</div>
+          </div>
+          <div class="overlay-status" id="overlayStatus" hidden><span class="status-pill" id="status"></span></div>
+        </div>
+
+        <div class="row" id="startRow">
+          <button class="btn" id="startBtn" disabled>Scan my face</button>
+        </div>
+        <div class="row" id="reviewRow" hidden>
+          <button class="btn ghost" id="retakeBtn">Retake</button>
+          <button class="btn" id="registerBtn">Register me</button>
+        </div>
+        <button class="link-btn" id="uploadBtn">Or upload a photo instead</button>
+        <input type="file" id="file" accept="image/*" hidden>
+
+        <div class="msg" id="msg"></div>
+        <p class="privacy">Your photo and a face template are stored on this FacePass server so the scanner can recognise you.</p>
+      </div>
+
+      <div class="done" id="done" hidden>
+        <img id="doneImg" alt="">
+        <h2 id="doneTitle"></h2>
+        <p>You're registered. Tap <b>Verify my face</b> on the FacePass app to check in.</p>
+        <button class="btn ghost" id="againBtn">Register someone else</button>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script type="module">
+  import { loadModels, FaceFrame, describeImage } from "/static/js/facekit.js";
+
+  const $ = (id) => document.getElementById(id);
+  const area = $("area"), placeholder = $("placeholder");
+  let frame = null, captured = null, preview = null;
+
+  function showMsg(text, kind = "error") {
+    const m = $("msg");
+    m.textContent = text;
+    m.className = `msg show ${kind}`;
+  }
+  const clearMsg = () => ($("msg").className = "msg");
+  const setStatus = (text, kind) => { $("status").textContent = text; $("status").dataset.kind = kind; };
+
+  loadModels((t) => ($("loadText").textContent = t))
+    .then(() => {
+      $("loadText").textContent = "Press “Scan my face” to open your camera";
+      $("startBtn").disabled = false;
+    })
+    .catch((e) => {
+      console.error(e);
+      $("loadText").textContent = "Couldn't load the face models. Refresh the page to try again.";
+    });
+
+  function resetCapture() {
+    captured = null;
+    preview?.remove(); preview = null;
+    frame?.stop(); frame?.el.remove(); frame = null;
+    placeholder.hidden = false;
+    $("overlayStatus").hidden = true;
+    $("startRow").hidden = false;
+    $("reviewRow").hidden = true;
+    $("uploadBtn").hidden = false;
+  }
+
+  function showCaptured(result) {
+    captured = result;
+    frame?.stop(); frame?.el.remove(); frame = null;
+    $("overlayStatus").hidden = true;
+    placeholder.hidden = true;
+    preview = new Image();
+    preview.className = "preview";
+    preview.src = result.photo;
+    area.appendChild(preview);
+    $("startRow").hidden = true;
+    $("reviewRow").hidden = false;
+    $("uploadBtn").hidden = true;
+  }
+
+  $("startBtn").onclick = async () => {
+    clearMsg();
+    resetCapture();
+    const el = document.createElement("div");
+    area.prepend(el);
+    frame = new FaceFrame(el, {
+      onStatus: setStatus,
+      onAligned: async () => {
+        setStatus("Scanning…", "capturing");
+        try {
+          showCaptured(await frame.capture(3));
+        } catch (e) {
+          setStatus(e.message, "warn");
+          setTimeout(() => frame?.resume(), 1200);
+        }
+      },
+    });
+    placeholder.hidden = true;
+    $("overlayStatus").hidden = false;
+    $("startRow").hidden = true;
+    setStatus("Starting camera…", "searching");
+    try {
+      await frame.start();
+    } catch (e) {
+      resetCapture();
+      showMsg(e.name === "NotAllowedError"
+        ? "Camera permission was blocked. Allow camera access in your browser, or upload a photo."
+        : e.message || "Couldn't open the camera.");
+    }
+  };
+
+  $("retakeBtn").onclick = () => { clearMsg(); $("startBtn").click(); };
+
+  $("uploadBtn").onclick = () => $("file").click();
+  $("file").onchange = async () => {
+    const f = $("file").files[0];
+    $("file").value = "";
+    if (!f) return;
+    clearMsg();
+    resetCapture();
+    $("loadText").textContent = "Reading photo…";
+    const img = new Image();
+    img.src = URL.createObjectURL(f);
+    try {
+      await img.decode();
+      showCaptured(await describeImage(img));
+    } catch (e) {
+      resetCapture();
+      showMsg(e.message || "Couldn't read that photo.");
+    } finally {
+      $("loadText").textContent = "Press “Scan my face” to open your camera";
+      URL.revokeObjectURL(img.src);
+    }
+  };
+
+  $("registerBtn").onclick = async () => {
+    clearMsg();
+    const name = $("name").value.trim();
+    if (!name) { showMsg("Please enter your name first."); $("name").focus(); return; }
+    if (!captured) return;
+    $("registerBtn").disabled = true;
+    $("registerBtn").textContent = "Registering…";
+    try {
+      const res = await fetch("/api/enroll", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, descriptors: captured.descriptors, photo: captured.photo }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Server error (${res.status})`);
+      $("doneImg").src = captured.photo;
+      $("doneTitle").textContent = `Welcome, ${data.name}`;
+      $("form").hidden = true;
+      $("done").hidden = false;
+    } catch (e) {
+      showMsg(e.message);
+    } finally {
+      $("registerBtn").disabled = false;
+      $("registerBtn").textContent = "Register me";
+    }
+  };
+
+  $("againBtn").onclick = () => {
+    $("name").value = "";
+    resetCapture();
+    clearMsg();
+    $("done").hidden = true;
+    $("form").hidden = false;
+  };
+</script>
+</body>
+</html>

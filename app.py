@@ -44,11 +44,12 @@ def health():
 
 @app.after_request
 def headers(resp):
-    # Long cache for the big model files; pages and API stay fresh.
-    if request.path.startswith("/static/ml/") and resp.status_code == 200:
-        resp.headers["Cache-Control"] = "public, max-age=604800, immutable"
-    elif request.path.startswith("/api/") or not request.path.startswith("/static/"):
+    # Pages and API responses are never cached; static files are re-validated (ETag) on every load,
+    # so phones and the app always pick up a new deploy.
+    if request.path.startswith("/api/") or not request.path.startswith("/static/"):
         resp.headers["Cache-Control"] = "no-store"
+    else:
+        resp.headers["Cache-Control"] = "no-cache"
     return resp
 
 
@@ -169,4 +170,4 @@ def stats():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True, use_reloader=False)
